@@ -65,7 +65,7 @@ DBI::dbWriteTable(con_clean, "ativo", ativo, overwrite = TRUE)
 
 rm(ativo)
 
-### CARTEIRAS DE CREDITO - MODALIDADE E PRAZO ###
+###### CARTEIRAS DE CREDITO - MODALIDADE E PRAZO ######
 carteira_pf_modalidade_prazo <- con %>%
                                     tbl("carteira_de_credito_ativa_pessoa_fisica_modalidade_e_prazo_de_vencimento") %>%
                                     collect()
@@ -185,3 +185,207 @@ carteira_modalidade_prazo <- bind_rows(
 DBI::dbWriteTable(con_clean, "carteira_modalidade_prazo", carteira_modalidade_prazo, overwrite = TRUE)
 
 rm(carteira_modalidade_prazo, carteira_pf_modalidade_prazo, carteira_pj_modalidade_prazo)
+
+###### CARTEIRA DE CREDITO - OUTROS ######
+carteira_pj_atv_econ <- con %>%
+                         tbl("carteira_de_credito_ativa_pessoa_juridica_por_atividade_economica") %>%
+                         collect()
+
+carteira_pj_atv_econ <- carteira_pj_atv_econ %>%
+                            select(
+                                instituicao, data, tipo_if, arquivo_origem, codigo,
+                                segmento, instituicao_financeira, tcb, td, tc, sr, cidade,
+                                uf, (starts_with("total") | ends_with("total")), everything()
+                            ) %>%
+                            rename(
+                                nao_individualizado_pessoa_juridica_total = total_nao_individualizado_pessoa_juridica,
+                                exterior_pessoa_juridica_total = total_exterior_pessoa_juridica
+                            ) %>%
+                            pivot_longer(
+                                nao_individualizado_pessoa_juridica_total:outros_a_vencer_acima_de_5400_dias,
+                                names_to = "modalidade_vencimento",
+                                values_to = "valor"
+                            ) %>%
+                            mutate(
+                                modalidade_split = str_split(
+                                    modalidade_vencimento, "_a_vencer|_vencido|_total"
+                                ),
+                                modalidade = purrr::map_chr(modalidade_split, 1),
+                                vencimento = purrr::map_chr(modalidade_split, 2),
+                                vencimento = case_when(
+                                    grepl("a_vencer", modalidade_vencimento) ~ paste0("a_vencer", vencimento),
+                                    grepl("vencido", modalidade_vencimento) ~ paste0("vencido", vencimento),
+                                    grepl("total", modalidade_vencimento) ~ paste0("total", vencimento)
+                                )
+                            )
+
+carteira_pj_atv_econ <- carteira_pj_atv_econ %>%
+                                    select(-c(modalidade_split, modalidade_vencimento)) %>%
+                                    pivot_wider(
+                                        names_from = "vencimento",
+                                        values_from = "valor"
+                                    ) %>%
+                                    select(
+                                        instituicao, data, tipo_if, arquivo_origem, codigo,
+                                        segmento, instituicao_financeira, tcb, td, tc, sr, cidade,
+                                        uf, modalidade, everything()
+                                    ) %>%
+                                    mutate(
+                                        data = as.Date(paste0("01/", data), format = "%d/%m/%Y"),
+                                        across(
+                                            (
+                                                starts_with("total") | starts_with("vencido") | starts_with("a_vencer")
+                                                | starts_with("atividade")
+                                            ),
+                                            ~ as.integer(str_replace_all(.x, "\\.", ""))
+                                        )
+                                    )
+
+carteira_pj_atv_econ <- carteira_pj_atv_econ %>%
+                            filter(!is.na(data))
+
+DBI::dbWriteTable(con_clean, "carteira_pj_atv_econ", carteira_pj_atv_econ, overwrite = TRUE)
+rm(carteira_pj_atv_econ)
+
+carteira_pj_porte <- con %>%
+                        tbl("carteira_de_credito_ativa_pessoa_juridica_por_porte_do_tomador") %>%
+                        collect()
+
+carteira_pj_porte <- carteira_pj_porte %>%
+                        select(
+                            instituicao, data, tipo_if, arquivo_origem, codigo,
+                            segmento, instituicao_financeira, tcb, td, tc, sr, cidade,
+                            uf, (starts_with("total") | ends_with("total")), everything()
+                        ) %>%
+                        rename(
+                            nao_individualizado_pessoa_juridica_total = total_nao_individualizado_pessoa_juridica,
+                            exterior_pessoa_juridica_total = total_exterior_pessoa_juridica
+                        ) %>%
+                        pivot_longer(
+                            micro:indisponivel,
+                            names_to = "porte",
+                            values_to = "valor"
+                        ) %>%
+                        select(
+                            instituicao, data, tipo_if, arquivo_origem, codigo,
+                            segmento, instituicao_financeira, tcb, td, tc, sr, cidade,
+                            uf, everything()
+                        ) %>%
+                        mutate(
+                            data = as.Date(paste0("01/", data), format = "%d/%m/%Y"),
+                            across(
+                                total_da_carteira_de_pessoa_juridica:valor,
+                                ~ as.integer(str_replace_all(.x, "\\.", ""))
+                            )
+                        )
+
+carteira_pj_porte <- carteira_pj_porte %>%
+                        filter(!is.na(data))
+
+DBI::dbWriteTable(con_clean, "carteira_pj_porte", carteira_pj_porte, overwrite = TRUE)
+
+rm(carteira_pj_porte)
+
+carteira_instr_fin <- con %>%
+                            tbl("carteira_de_credito_ativa_por_carteiras_de_instrumentos_financeiros") %>%
+                            collect()
+
+carteira_instr_fin <- carteira_instr_fin %>%
+                            select(
+                                instituicao, data, tipo_if, arquivo_origem, codigo,
+                                tcb, td, tc, sr, cidade, uf, (starts_with("total")),
+                                everything()
+                            ) %>%
+                            pivot_longer(
+                                carteiras_c1:carteira_nao_informada_ou_nao_se_aplica,
+                                names_to = "tipo_carteira",
+                                values_to = "valor"
+                            ) %>%
+                            select(
+                                instituicao, data, tipo_if, arquivo_origem, codigo,
+                                tcb, td, tc, sr, cidade, uf, tipo_carteira, (starts_with("total")),
+                                everything()
+                            ) %>%
+                            mutate(
+                                data = as.Date(paste0("01/", data), format = "%d/%m/%Y"),
+                                tipo_carteira = str_replace_all(tipo_carteira, "carteira_|carteiras_", ""),
+                                across(total_geral:valor, ~ as.integer(str_replace_all(.x, "\\.", "")))
+                            )
+
+carteira_instr_fin <- carteira_instr_fin %>%
+                        filter(!is.na(data))
+
+DBI::dbWriteTable(con_clean, "carteira_instr_fin", carteira_instr_fin, overwrite = TRUE)
+rm(carteira_instr_fin)
+
+carteira_indexador <- con %>%
+                        tbl("carteira_de_credito_ativa_por_indexador") %>%
+                        collect()
+
+carteira_indexador <- carteira_indexador %>%
+                        janitor::clean_names() %>%
+                        select(
+                            instituicao, data, tipo_if, arquivo_origem, codigo,
+                            segmento, instituicao_financeira, tcb, td, tc, sr, cidade,
+                            uf, (starts_with("total")), everything()
+                        ) %>%
+                        rename(
+                            total_prefixado = prefixado
+                        ) %>%
+                        pivot_longer(
+                            tr_tbf:trfc_pos,
+                            names_to = "indice",
+                            values_to = "valor"
+                        ) %>%
+                        select(
+                            instituicao, data, tipo_if, arquivo_origem, codigo,
+                            segmento, instituicao_financeira, tcb, td, tc, sr, cidade,
+                            uf, indice, (starts_with("total")), everything()
+                        ) %>%
+                        mutate(
+                            data = as.Date(paste0("01/", data), format = "%d/%m/%Y"),
+                            tipo_indice = if_else(grepl("pre", indice), "prefixado", "posfixado"),
+                            across(total_geral:valor, ~ as.integer(str_replace_all(.x, "\\.", "")))
+                        )
+
+carteira_indexador <- carteira_indexador %>%
+                        filter(!is.na(data))
+
+DBI::dbWriteTable(con_clean, "carteira_indexador", carteira_indexador, overwrite = TRUE)
+rm(carteira_indexador)
+
+carteira_nivel_risco <- con %>%
+                            tbl("carteira_de_credito_ativa_por_nivel_de_risco_da_operacao") %>%
+                            collect()
+
+
+carteira_nivel_risco <- carteira_nivel_risco %>%
+                        select(
+                            instituicao, data, tipo_if, arquivo_origem, codigo,
+                            segmento, instituicao_financeira, tcb, td, tc, sr, cidade,
+                            uf, (starts_with("total")), everything()
+                        ) %>%
+                        pivot_longer(
+                            aa:h,
+                            names_to = "nivel_risco",
+                            values_to = "valor"
+                        ) %>%
+                        select(
+                            instituicao, data, tipo_if, arquivo_origem, codigo,
+                            segmento, instituicao_financeira, tcb, td, tc, sr, cidade,
+                            uf, nivel_risco, (starts_with("total")), everything()
+                        ) %>%
+                        mutate(
+                            data = as.Date(paste0("01/", data), format = "%d/%m/%Y"),
+                            across(total_geral:valor, ~ as.integer(str_replace_all(.x, "\\.", "")))
+                        )
+
+carteira_nivel_risco <- carteira_nivel_risco %>%
+                            filter(!is.na(data))
+
+DBI::dbWriteTable(con_clean, "carteira_nivel_risco", carteira_nivel_risco, overwrite = TRUE)
+rm(carteira_nivel_risco)
+
+carteira_regiao <- con %>%
+                    tbl("carteira_de_credito_ativa_por_regiao_geografica") %>%
+                    collect()
