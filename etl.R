@@ -10,50 +10,26 @@ ativo <- con %>%
             collect() %>%
             janitor::clean_names()
 
-# retrofitando algumas colunas
+# transformando colunas
 ativo <- ativo %>%
             mutate(
                 instituicao = coalesce(instituicao, ativos_instituicoes, instituicao_financeira),
                 tc = coalesce(tc, ativos_tc),
                 td = coalesce(td, ativos_td),
-                data = coalesce(data, ativos_data_balancete),
-                disponibilidades_a = coalesce(disponibilidades_a, ativos_disponibilidades),
-                aplicacoes_interfinanceiras_de_liquidez_b = coalesce(
-                    aplicacoes_interfinanceiras_de_liquidez_b, ativos_aplicacoes_interfinanceiras
-                ),
-                tvm_e_instrumentos_financeiros_derivativos_c = coalesce(
-                    tvm_e_instrumentos_financeiros_derivativos_c, ativos_tvm_e_instrumentos_financeiros_derivativos
-                ),
-                ativo_total_k_a_b_c_d_e_f_g_h_i_j = coalesce(
-                    ativo_total_k_a_b_c_d_e_f_g_h_i_j, ativo_total_k_i_j, ativos_ativo_total
-                ),
-                ativo_permanente_j = coalesce(
-                    ativo_permanente_j, ativos_permanente
-                )
+                data = coalesce(data, ativos_data_balancete)
             ) %>%
+            select(-c(
+                ativos_instituicoes, instituicao_financeira, ativos_tc,
+                ativos_td, ativos_data_balancete, ativos_ranking, ativos_obs
+            )) %>%
             select(
-                -c(
-                    ativos_instituicoes, ativos_data_balancete, ativos_disponibilidades,
-                    ativos_aplicacoes_interfinanceiras, ativos_tvm_e_instrumentos_financeiros_derivativos,
-                    ativo_total_k_i_j, ativos_ativo_total, instituicao_financeira, ativos_permanente,
-                    ativos_tc, ativos_td
-                )
-            ) %>%
-            rename(
-                ativo_total = ativo_total_k_a_b_c_d_e_f_g_h_i_j
-            )
-
-# transformando colunas
-ativo <- ativo %>%
-            select(
-                instituicao, data, tipo_if, arquivo_origem, codigo, conglomerado, conglomerado_financeiro,
-                conglomerado_financeiro_2, conglomerado_prudencial, conglomerado_prudencial_2, ativos_ranking,
-                ativos_obs, tcb, tc, ti, td, sr, cidade, uf, everything()
+                instituicao, data, tipo_if, arquivo_origem, codigo, starts_with("conglomerado"),
+                tcb, tc, ti, td, sr, cidade, uf, everything()
             ) %>%
             mutate(
                 data = as.Date(paste0("01/", data), format = "%d/%m/%Y"),
                 across(
-                    disponibilidades_a:ativos_imobilizado_de_arrendamento, ~ as.integer(str_replace_all(.x, "\\.", ""))
+                    disponibilidades_a:ativos_permanente, ~ as.integer(str_replace_all(.x, "\\.", ""))
                 )
             )
 
@@ -61,8 +37,62 @@ ativo <- ativo %>%
 ativo <- ativo %>%
             filter(!is.na(data))
 
-DBI::dbWriteTable(con_clean, "ativo", ativo, overwrite = TRUE)
+# retrofit de colunas - pegar so colunas em comum com todos os reports antigos
+ativo <- ativo %>%
+            mutate(
+                tvm_e_instrumentos_financeiros_derivativos_2025 = (
+                    titulos_e_valores_mobiliarios_c + instrumentos_derivativos_d
+                ),
+                oper_cred_e_arrend_mercantil_2024 = (
+                    operacoes_de_credito_operacoes_de_credito_d1 +
+                    arrendamento_mercantil_arrendamento_mercantil_a_receber_e1 +
+                    arrendamento_mercantil_imobilizado_de_arrendamento_e2
+                ),
+                oper_cred_e_arrend_mercantil_2025 = (
+                    operacoes_de_credito_valor_contabil_bruto_e1 +
+                    operacoes_de_arrendamento_financeiro_valor_contabil_bruto_f1
+                )
+            ) %>%
+            mutate(
+                disponibilidades_a = coalesce(disponibilidades_a, ativos_disponibilidades),
+                aplicacoes_interfinanceiras_de_liquidez_b = coalesce(
+                    aplicacoes_interfinanceiras_de_liquidez_b, ativos_aplicacoes_interfinanceiras
+                ),
+                tvm_e_instrumentos_financeiros_derivativos_c = coalesce(
+                    tvm_e_instrumentos_financeiros_derivativos_c,
+                    ativos_tvm_e_instrumentos_financeiros_derivativos,
+                    tvm_e_instrumentos_financeiros_derivativos_2025
+                ),
+                oper_cred_e_arrend_mercantil = coalesce(
+                    ativos_oper_cred_e_arrend_mercantil_total, oper_cred_e_arrend_mercantil_2024,
+                    oper_cred_e_arrend_mercantil_2025
+                ),
+                ativo_total_k_a_b_c_d_e_f_g_h_i_j = coalesce(
+                    ativo_total_k_a_b_c_d_e_f_g_h_i_j, ativo_total_k_i_j, ativos_ativo_total
+                ),
+                ativo_permanente_j = coalesce(
+                    ativo_permanente_j, permanente_ajustado_h, ativos_permanente
+                ),
+                outros_ativos_realizaveis_i = coalesce(
+                    outros_ativos_realizaveis_i, outros_ativos_realizaveis_g, ativos_outros_valores_e_bens
+                )
+            ) %>%
+            rename(
+                disponibilidades = disponibilidades_a,
+                aplicacoes_interfinanceiras_liquidez = aplicacoes_interfinanceiras_de_liquidez_b,
+                tvm_e_derivativos = tvm_e_instrumentos_financeiros_derivativos_c,
+                outros_ativos_realizaveis = outros_ativos_realizaveis_i,
+                ativo_permanente = ativo_permanente_j,
+                ativo_total = ativo_total_k_a_b_c_d_e_f_g_h_i_j
+            ) %>%
+            select(
+                instituicao, data, tipo_if, arquivo_origem, codigo, starts_with("conglomerado"),
+                tcb, tc, ti, td, sr, cidade, uf, disponibilidades, aplicacoes_interfinanceiras_liquidez,
+                tvm_e_derivativos, oper_cred_e_arrend_mercantil, ativo_total, ativo_permanente,
+                outros_ativos_realizaveis
+            )
 
+DBI::dbWriteTable(con_clean, "ativo", ativo, overwrite = TRUE)
 rm(ativo)
 
 ###### CARTEIRAS DE CREDITO - MODALIDADE E PRAZO #######
@@ -438,7 +468,7 @@ carteira_qtd_cli_operacoes <- carteira_qtd_cli_operacoes %>%
 DBI::dbWriteTable(con_clean, "carteira_qtd_cli_operacoes", carteira_qtd_cli_operacoes, overwrite = TRUE)
 rm(carteira_qtd_cli_operacoes)
 
-###### DEMONSTRACAO DE RESULTADO ###### 
+###### DEMONSTRACAO DE RESULTADO ######
 
 demonstracao_resultado <- con %>%
                             tbl("demonstracao_de_resultado") %>%
@@ -461,3 +491,42 @@ demonstracao_resultado <- demonstracao_resultado %>%
                                 )
                             ) %>%
                             select(-instituicao_financeira)
+
+demonstracao_resultado <- demonstracao_resultado %>%
+                            filter(!is.na(data))
+
+DBI::dbWriteTable(con_clean, "demonstracao_resultado", demonstracao_resultado, overwrite = TRUE)
+rm(demonstracao_resultado)
+
+depositos <- con %>%
+                tbl("deposito") %>%
+                collect()
+
+depositos <- depositos %>%
+                janitor::clean_names() %>%
+                rename_with(., ~ str_replace(.x, "depositos_total_", "")) %>%
+                rename(
+                    data = data_balancete,
+                    instituicao = instituicoes
+                ) %>%
+                select(
+                    instituicao, data, tipo_if, arquivo_origem, td, tc, obs,
+                    ranking_por_depositos_totais, ranking_por_ativo_total_intermediacao,
+                    everything()
+                ) %>%
+                mutate(
+                     data = as.Date(paste0("01/", data), format = "%d/%m/%Y"),
+                     obs = trimws(obs),
+                     instituicao = trimws(instituicao),
+                     across(depositos_a_vista:total, ~ as.integer(str_replace(.x, "\\.", "")))
+                )
+
+depositos <- depositos %>%
+                filter(!is.na(data))
+
+DBI::dbWriteTable(con_clean, "depositos", depositos, overwrite = TRUE)
+rm(depositos)
+
+informacoes_capital <- con %>%
+                        tbl("informacoes_de_capital") %>%
+                        collect()
