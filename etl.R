@@ -4,7 +4,7 @@ library(here)
 con <- DBI::dbConnect(duckdb::duckdb(), here("repos/ifdata_scraper/ifdata_raw.duckdb"))
 con_clean <- DBI::dbConnect(duckdb::duckdb(), here("repos/ifdata_scraper/ifdata_clean.duckdb"))
 
-##### ATIVO ######
+###### ATIVO ######
 ativo <- con %>%
             tbl("ativo") %>%
             collect() %>%
@@ -65,7 +65,7 @@ DBI::dbWriteTable(con_clean, "ativo", ativo, overwrite = TRUE)
 
 rm(ativo)
 
-###### CARTEIRAS DE CREDITO - MODALIDADE E PRAZO ######
+###### CARTEIRAS DE CREDITO - MODALIDADE E PRAZO #######
 carteira_pf_modalidade_prazo <- con %>%
                                     tbl("carteira_de_credito_ativa_pessoa_fisica_modalidade_e_prazo_de_vencimento") %>%
                                     collect()
@@ -186,7 +186,7 @@ DBI::dbWriteTable(con_clean, "carteira_modalidade_prazo", carteira_modalidade_pr
 
 rm(carteira_modalidade_prazo, carteira_pf_modalidade_prazo, carteira_pj_modalidade_prazo)
 
-###### CARTEIRA DE CREDITO - OUTROS ######
+###### CARTEIRA DE CREDITO - OUTROS #######
 carteira_pj_atv_econ <- con %>%
                          tbl("carteira_de_credito_ativa_pessoa_juridica_por_atividade_economica") %>%
                          collect()
@@ -389,3 +389,75 @@ rm(carteira_nivel_risco)
 carteira_regiao <- con %>%
                     tbl("carteira_de_credito_ativa_por_regiao_geografica") %>%
                     collect()
+
+carteira_regiao <- carteira_regiao %>%
+                    select(
+                        instituicao, data, tipo_if, arquivo_origem, codigo,
+                        segmento, instituicao_financeira, tcb, td, tc, sr, cidade,
+                        uf, (starts_with("total")), everything()
+                    ) %>%
+                    pivot_longer(
+                        sudeste:regiao_nao_informada,
+                        names_to = "regiao",
+                        values_to = "valor"
+                    ) %>%
+                    select(
+                        instituicao, data, tipo_if, arquivo_origem, codigo,
+                        segmento, instituicao_financeira, tcb, td, tc, sr, cidade,
+                        uf, regiao, (starts_with("total")), everything()
+                    )  %>%
+                    mutate(
+                        data = as.Date(paste0("01/", data), format = "%d/%m/%Y"),
+                        across(total_geral:valor, ~ as.integer(str_replace_all(.x, "\\.", "")))
+                    )
+
+carteira_regiao <- carteira_regiao %>%
+                    filter(!is.na(data))
+
+DBI::dbWriteTable(con_clean, "carteira_regiao", carteira_regiao, overwrite = TRUE)
+rm(carteira_regiao)
+
+carteira_qtd_cli_operacoes <- con %>%
+                                tbl("carteira_de_credito_ativa_quantidade_de_clientes_e_de_operacoes") %>%
+                                collect()
+
+carteira_qtd_cli_operacoes <- carteira_qtd_cli_operacoes %>%
+                                select(
+                                    instituicao, data, tipo_if, arquivo_origem, codigo,
+                                    segmento, instituicao_financeira, tcb, td, tc, sr, cidade,
+                                    uf, starts_with("quantidade")
+                                ) %>%
+                                mutate(
+                                    data = as.Date(paste0("01/", data), format = "%d/%m/%Y"),
+                                    across(starts_with("quantidade"), ~ as.integer(str_replace_all(.x, "\\.", "")))
+                                )
+
+carteira_qtd_cli_operacoes <- carteira_qtd_cli_operacoes %>%
+                                filter(!is.na(data))
+
+DBI::dbWriteTable(con_clean, "carteira_qtd_cli_operacoes", carteira_qtd_cli_operacoes, overwrite = TRUE)
+rm(carteira_qtd_cli_operacoes)
+
+###### DEMONSTRACAO DE RESULTADO ###### 
+
+demonstracao_resultado <- con %>%
+                            tbl("demonstracao_de_resultado") %>%
+                            collect()
+
+demonstracao_resultado <- demonstracao_resultado %>%
+                            janitor::clean_names() %>%
+                            select(
+                                instituicao, data, tipo_if, arquivo_origem, codigo, conglomerado,
+                                conglomerado_financeiro, conglomerado_financeiro_2, conglomerado_prudencial,
+                                conglomerado_prudencial_2, tcb, tc, ti, td, sr,
+                                cidade, uf, everything()
+                            ) %>%
+                            mutate(
+                                instituicao = coalesce(instituicao, instituicao_financeira),
+                                data = as.Date(paste0("01/", data), format = "%d/%m/%Y"),
+                                across(
+                                    resultado_de_intermediacao_financeira_receitas_de_intermediacao_financeira_rendas_de_operacoes_de_credito_a1:lucro_liquido_aa_x_y_z, # nolint
+                                    ~ as.integer(str_replace_all(.x, "\\.", ""))
+                                )
+                            ) %>%
+                            select(-instituicao_financeira)
