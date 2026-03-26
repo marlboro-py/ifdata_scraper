@@ -17,6 +17,8 @@
 library(tidyverse)
 library(here)
 
+# TODO: juntar codigo de conglomerado com CNPJs do conglomerado
+
 con <- DBI::dbConnect(duckdb::duckdb(), here("repos/ifdata_scraper/ifdata_raw.duckdb"))
 con_clean <- DBI::dbConnect(duckdb::duckdb(), here("repos/ifdata_scraper/ifdata_clean.duckdb"))
 
