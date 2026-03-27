@@ -73,9 +73,6 @@ cresc_carteira <- carteira_modalidade_prazo %>%
                         npl_15 = venc_15dias_total / total_da_carteira,
                         qoq_mdl_perc_avg = mean(abs(qoq_mdl_avg), na.rm = TRUE)
                     ) %>%
-                    select(qoq_mdl_perc_avg) %>%
-                    pull(.) %>%
-                    quantile(., probs = seq(0, 1, by = .1), na.rm = TRUE)
                     filter( # logica: so pega modalidades relevantes pra carteira
                            # ou modalidades que ganharam crescimento significativo
                         ((perc_mdl_avg > .02) | (perc_mdl <= .02 & qoq_mdl_avg >= .20))
@@ -90,7 +87,7 @@ cresc_carteira <- carteira_modalidade_prazo %>%
                     select(
                         instituicao, data, tipo_pessoa, modalidade,
                         qoq_mdl_avg, perc_mdl_avg, mkt_share_mdl_avg, npl_15_mdl_avg, rnk_perc, rnk_cresc,
-                        total, total_mercado_por_pessoa, total_da_carteira, venc_15dias_total, npl_15
+                        total, total_mercado_por_pessoa, total_da_carteira, venc_15dias_total, npl_15, qoq_mdl_perc_avg
                     ) %>%
                     arrange(instituicao, data) %>%
                     group_by(instituicao, tipo_pessoa) %>%
@@ -99,12 +96,12 @@ cresc_carteira <- carteira_modalidade_prazo %>%
                             total_da_carteira / total_mercado_por_pessoa, 6
                         ) * 100,
                         qoq_inad = round(
-                            (npl_15 - lag(npl_15, 4)) / lag(npl_15, 4), 4
+                            (npl_15 - lag(npl_15)) / lag(npl_15), 4
                         ) * 100,
-                        yoy = round(
-                            (total_da_carteira - lag(total_da_carteira, 4)) / lag(total_da_carteira, 4), 4
+                        qoq = round(
+                            (total_da_carteira - lag(total_da_carteira)) / lag(total_da_carteira), 4
                         ) * 100,
-                        qoq_avg = mean(yoy, na.rm = TRUE),
+                        qoq_avg = mean(qoq, na.rm = TRUE),
                         inad_avg = mean(npl_15, na.rm = TRUE),
                         qoq_inad_avg = mean(qoq_inad, na.rm = TRUE),
                         mkt_share_avg = mean(mkt_share, na.rm = TRUE)
@@ -139,16 +136,42 @@ cresc_carteira <- carteira_modalidade_prazo %>%
                         ),
                         rebalanceamento_carteira = case_when(
                             qoq_mdl_perc_avg < 5 ~ "estavel",
-                            qoq_mdl_avg <= 10 ~ "moderado",
-                            qoq_mdl_avg > 10 ~ "significativo"
+                            qoq_mdl_perc_avg <= 10 ~ "moderado",
+                            qoq_mdl_perc_avg > 10 ~ "significativo"
                         )
                     ) %>%
-                    fi
                     select(
                         instituicao, tipo_pessoa, modalidade,
-                        qoq_mdl_avg, perc_mdl_avg, mkt_share_mdl_avg, npl_15_mdl_avg, rnk_perc, rnk_cresc,
-                        mkt_share_avg, inad_avg, qoq_avg, qoq_inad_avg, porte, crescimento_carteira, crescimento_inad
+                        qoq_mdl_avg, perc_mdl_avg, npl_15_mdl_avg, rnk_perc, rnk_cresc, crescimento_mdl, mkt_share_avg,
+                        inad_avg, qoq_avg, qoq_inad_avg,  porte, crescimento_carteira, crescimento_inad, rebalanceamento_carteira #nolint
                     ) %>%
                     distinct(
                         instituicao, tipo_pessoa, modalidade, .keep_all = TRUE
                     )
+
+writexl::write_xlsx(cresc_carteira, here("repos/ifdata_scraper/lista_ifdata_v2.xlsx"))
+
+carteira_modalidade_prazo %>%
+                    group_by(data, tipo_pessoa, modalidade) %>%
+                    mutate( # agrega o mercado por modalidade
+                        total_mercado = sum(total, na.rm = TRUE)
+                    ) %>%
+                    group_by(instituicao, data, tipo_pessoa, modalidade) %>%
+                    mutate( # faz calculos da relacao instituicao < > mercado nivel mdl
+                        venc_15dias = sum(vencido_a_partir_de_15_dias, na.rm = TRUE)
+                    ) %>%
+                    select(
+                        instituicao, data, tipo_if, tipo_pessoa, modalidade,
+                        total_da_carteira, total_mercado, total, venc_15dias
+                    ) %>%
+                    arrange(instituicao, data, tipo_pessoa, modalidade) %>%
+                    group_by(data, tipo_pessoa) %>%
+                    mutate( # agregacoes a nivel carteira mercado p/ nao perder no filtro
+                        total_mercado_por_pessoa = sum(total, na.rm = TRUE)
+                    ) %>%
+                    group_by(instituicao, data, tipo_pessoa) %>%
+                    mutate( # soma os vencidos por 15 dias por pf/pj pra nao perder no filtro
+                        venc_15dias_total = sum(venc_15dias, na.rm = TRUE)
+                    ) %>%
+                    arrange(instituicao, data) %>%
+                    writexl::write_xlsx(., here("repos/ifdata_scraper/cubo_ifdata.xlsx"))
